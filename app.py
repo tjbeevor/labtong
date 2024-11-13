@@ -7,170 +7,151 @@ from scipy import stats
 
 st.set_page_config(page_title="LPBF AlSi10Mg Analysis", layout="wide")
 
+def clean_numeric_data(df, column):
+    """Clean and convert numeric data, handling errors"""
+    try:
+        return pd.to_numeric(df[column], errors='coerce')
+    except:
+        return pd.Series([np.nan] * len(df))
+
 def process_lpbf_data(df):
-    """Process LPBF data with materials science focus"""
-    # Convert important columns to numeric
-    numeric_columns = [
-        'power', 'speed', 'UTS', 'YS', 'Elongation', 
-        'solution temp', 'ageing temp', 'hardness',
-        'Hatch', 'thickness', 'Density'
-    ]
+    """Process LPBF data with robust error handling"""
+    processed_df = df.copy()
     
+    # Display initial data info for debugging
+    st.write("Data shape:", processed_df.shape)
+    st.write("Columns:", processed_df.columns.tolist())
+    
+    # Clean numeric columns
+    numeric_columns = {
+        'power': 'power',
+        'speed': 'speed',
+        'UTS': 'UTS',
+        'YS': 'YS',
+        'Elongation': 'Elongation',
+        'solution temp': 'solution temp',
+        'hardness': 'hardness'
+    }
+    
+    # Convert each column safely
     for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+        if col in processed_df.columns:
+            processed_df[col] = clean_numeric_data(processed_df, col)
     
-    # Calculate Energy Density (J/mm³)
-    if all(x in df.columns for x in ['power', 'speed', 'Hatch', 'thickness']):
-        df['Energy_Density'] = df['power'] / (df['speed'] * df['Hatch'] * df['thickness'])
-    
-    return df
+    return processed_df
 
 def main():
-    st.title("LPBF AlSi10Mg Process-Property Analyzer")
+    st.title("LPBF AlSi10Mg Process-Property Analysis")
     
     uploaded_file = st.file_uploader("Upload LPBF data (CSV)", type="csv")
     
     if uploaded_file:
-        # Read data
+        # Read and process data
         df = pd.read_csv(uploaded_file)
         processed_df = process_lpbf_data(df)
         
-        # Create main analysis sections
-        tab1, tab2, tab3 = st.tabs([
-            "Process Parameters", 
-            "Heat Treatment Analysis",
-            "Property Optimization"
-        ])
+        # Display data preview
+        st.write("### Data Preview")
+        st.dataframe(processed_df.head())
         
-        with tab1:
-            st.header("Process Parameter Analysis")
+        # Basic statistical summary
+        st.write("### Statistical Summary")
+        numeric_df = processed_df.select_dtypes(include=[np.number])
+        st.dataframe(numeric_df.describe())
+        
+        # Create analysis sections with error handling
+        try:
+            # Process Parameters Analysis
+            st.header("Process Parameters Analysis")
             
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                # Process window plot
-                fig = px.scatter(
-                    processed_df,
-                    x='speed',
-                    y='power',
-                    color='UTS',
-                    size='UTS',
-                    hover_data=['Density', 'Energy_Density'],
-                    title="Process Window Map (Color indicates UTS)",
-                    labels={
-                        'speed': 'Scan Speed (mm/s)',
-                        'power': 'Laser Power (W)',
-                        'UTS': 'Ultimate Tensile Strength (MPa)'
-                    }
-                )
-                st.plotly_chart(fig)
-            
-            with col2:
-                # Key process parameters
-                st.write("### Process Parameter Ranges")
-                metrics = {
-                    'Power (W)': processed_df['power'],
-                    'Speed (mm/s)': processed_df['speed'],
-                    'Energy Density (J/mm³)': processed_df['Energy_Density']
-                }
+            # Check if we have valid process parameter data
+            if 'power' in processed_df.columns and 'speed' in processed_df.columns:
+                valid_data = processed_df.dropna(subset=['power', 'speed'])
                 
-                for name, values in metrics.items():
-                    st.metric(
-                        name,
-                        f"{values.mean():.1f}",
-                        f"±{values.std():.1f}"
+                if not valid_data.empty:
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Scatter(
+                        x=valid_data['speed'],
+                        y=valid_data['power'],
+                        mode='markers',
+                        marker=dict(size=8),
+                        name='Process Points'
+                    ))
+                    
+                    fig.update_layout(
+                        title="Process Window Map",
+                        xaxis_title="Scan Speed (mm/s)",
+                        yaxis_title="Laser Power (W)"
                     )
-        
-        with tab2:
-            st.header("Heat Treatment Analysis")
-            
-            # Heat treatment effect visualization
-            col3, col4 = st.columns(2)
-            
-            with col3:
-                fig = px.scatter(
-                    processed_df,
-                    x='solution temp',
-                    y='UTS',
-                    color='ageing temp',
-                    size='Elongation',
-                    title="Heat Treatment Effects on Properties",
-                    labels={
-                        'solution temp': 'Solution Temperature (°C)',
-                        'UTS': 'Ultimate Tensile Strength (MPa)',
-                        'ageing temp': 'Aging Temperature (°C)'
-                    }
-                )
-                st.plotly_chart(fig)
-            
-            with col4:
-                st.write("### Heat Treatment Optimization")
-                
-                # Find optimal heat treatment conditions
-                best_strength = processed_df.nlargest(5, 'UTS')
-                st.write("Top 5 Heat Treatment Conditions:")
-                st.dataframe(
-                    best_strength[[
-                        'solution temp', 'ageing temp', 
-                        'UTS', 'YS', 'Elongation'
-                    ]]
-                )
-        
-        with tab3:
-            st.header("Property Optimization")
-            
-            # Property relationships
-            col5, col6 = st.columns(2)
-            
-            with col5:
-                # Strength-ductility trade-off
-                fig = px.scatter(
-                    processed_df,
-                    x='UTS',
-                    y='Elongation',
-                    color='Energy_Density',
-                    title="Strength-Ductility Trade-off",
-                    labels={
-                        'UTS': 'Ultimate Tensile Strength (MPa)',
-                        'Elongation': 'Elongation (%)',
-                        'Energy_Density': 'Energy Density (J/mm³)'
-                    }
-                )
-                st.plotly_chart(fig)
-            
-            with col6:
-                # Quality index analysis
-                if 'Quality' in processed_df.columns:
-                    fig = px.scatter(
-                        processed_df,
-                        x='Energy_Density',
-                        y='Quality',
-                        color='Density',
-                        title="Process Quality Analysis",
-                        labels={
-                            'Energy_Density': 'Energy Density (J/mm³)',
-                            'Quality': 'Quality Index',
-                            'Density': 'Relative Density (%)'
-                        }
-                    )
+                    
                     st.plotly_chart(fig)
             
-            # Optimization guidelines
-            st.write("### Process Optimization Guidelines")
+            # Mechanical Properties Analysis
+            st.header("Mechanical Properties Analysis")
             
-            # Find optimal process windows
-            optimal_conditions = processed_df[
-                (processed_df['UTS'] > processed_df['UTS'].quantile(0.75)) &
-                (processed_df['Elongation'] > processed_df['Elongation'].quantile(0.75))
-            ]
+            if all(col in processed_df.columns for col in ['UTS', 'Elongation']):
+                valid_properties = processed_df.dropna(subset=['UTS', 'Elongation'])
+                
+                if not valid_properties.empty:
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Scatter(
+                        x=valid_properties['UTS'],
+                        y=valid_properties['Elongation'],
+                        mode='markers',
+                        marker=dict(size=8),
+                        name='Properties'
+                    ))
+                    
+                    fig.update_layout(
+                        title="Strength-Ductility Relationship",
+                        xaxis_title="Ultimate Tensile Strength (MPa)",
+                        yaxis_title="Elongation (%)"
+                    )
+                    
+                    st.plotly_chart(fig)
             
-            if not optimal_conditions.empty:
-                st.write("Recommended Process Windows:")
-                st.write(f"- Power: {optimal_conditions['power'].mean():.0f} ± {optimal_conditions['power'].std():.0f} W")
-                st.write(f"- Speed: {optimal_conditions['speed'].mean():.0f} ± {optimal_conditions['speed'].std():.0f} mm/s")
-                if 'Energy_Density' in optimal_conditions:
-                    st.write(f"- Energy Density: {optimal_conditions['Energy_Density'].mean():.2f} ± {optimal_conditions['Energy_Density'].std():.2f} J/mm³")
+            # Heat Treatment Analysis
+            st.header("Heat Treatment Analysis")
+            
+            if 'solution temp' in processed_df.columns and 'UTS' in processed_df.columns:
+                valid_ht = processed_df.dropna(subset=['solution temp', 'UTS'])
+                
+                if not valid_ht.empty:
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Scatter(
+                        x=valid_ht['solution temp'],
+                        y=valid_ht['UTS'],
+                        mode='markers',
+                        marker=dict(size=8),
+                        name='Heat Treatment Effect'
+                    ))
+                    
+                    fig.update_layout(
+                        title="Heat Treatment Effect on Strength",
+                        xaxis_title="Solution Temperature (°C)",
+                        yaxis_title="Ultimate Tensile Strength (MPa)"
+                    )
+                    
+                    st.plotly_chart(fig)
+            
+            # Property Optimization
+            st.header("Property Optimization")
+            
+            if 'UTS' in processed_df.columns:
+                top_properties = processed_df.nlargest(5, 'UTS')
+                
+                if not top_properties.empty:
+                    st.write("### Top 5 Property Combinations")
+                    display_columns = ['UTS', 'YS', 'Elongation', 'power', 'speed', 'solution temp']
+                    display_columns = [col for col in display_columns if col in top_properties.columns]
+                    st.dataframe(top_properties[display_columns])
+        
+        except Exception as e:
+            st.error(f"Error in analysis: {str(e)}")
+            st.write("Please check your data format and try again.")
 
 if __name__ == "__main__":
     main()
