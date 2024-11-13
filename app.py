@@ -8,60 +8,80 @@ from scipy import stats
 # Set page configuration
 st.set_page_config(page_title="LPBF Analysis", layout="wide")
 
-# Cache the data processing
 @st.cache_data
 def process_data(df):
     """Process and clean the data."""
-    numeric_cols = ['speed', 'power', 'UTS', 'YS', 'Elongation', 'Hatch', 'thickness']
     processed_df = df.copy()
     
-    for col in numeric_cols:
-        if col in processed_df.columns:
-            processed_df[col] = pd.to_numeric(processed_df[col], errors='coerce')
+    # Print column names for debugging
+    print("Available columns:", processed_df.columns.tolist())
     
-    # Remove rows with missing values in key columns
-    key_cols = ['speed', 'power', 'UTS', 'YS', 'Elongation']
-    key_cols = [col for col in key_cols if col in processed_df.columns]
-    return processed_df.dropna(subset=key_cols)
+    # Map expected columns to actual columns
+    column_mapping = {
+        'speed': 'speed',  # mm/s
+        'power': 'power',  # W
+        'UTS': 'UTS',     # MPa
+        'YS': 'YS',       # MPa
+        'Elongation': 'Elongation',  # %
+        'Hatch': 'Hatch',           # mm
+        'thickness': 'thickness'     # mm
+    }
+    
+    # Convert numeric columns, handling both original and mapped names
+    for col in processed_df.columns:
+        try:
+            processed_df[col] = pd.to_numeric(processed_df[col], errors='coerce')
+        except:
+            continue
+    
+    return processed_df
 
 def create_scatter_plot(data, x_col, y_col):
     """Create scatter plot with trend line."""
-    fig = px.scatter(
-        data,
-        x=x_col,
-        y=y_col,
-        trendline="ols",
-        title=f"{y_col} vs {x_col}"
-    )
-    return fig
+    valid_data = data[[x_col, y_col]].dropna()
+    if len(valid_data) > 1:  # Check if we have enough data points
+        fig = px.scatter(
+            valid_data,
+            x=x_col,
+            y=y_col,
+            trendline="ols",
+            title=f"{y_col} vs {x_col}"
+        )
+        return fig
+    return None
 
 def calculate_statistics(data, x_col, y_col):
     """Calculate regression statistics."""
-    slope, intercept, r_value, p_value, std_err = stats.linregress(
-        data[x_col],
-        data[y_col]
-    )
-    return {
-        'R²': r_value**2,
-        'p-value': p_value,
-        'slope': slope,
-        'intercept': intercept
-    }
+    valid_data = data[[x_col, y_col]].dropna()
+    if len(valid_data) > 1:
+        slope, intercept, r_value, p_value, std_err = stats.linregress(
+            valid_data[x_col],
+            valid_data[y_col]
+        )
+        return {
+            'R²': r_value**2,
+            'p-value': p_value,
+            'slope': slope,
+            'intercept': intercept
+        }
+    return None
 
 def get_optimal_parameters(data):
     """Find optimal process parameters based on strength properties."""
-    # Get top 10% of samples based on UTS
     if 'UTS' in data.columns:
-        top_samples = data.nlargest(int(len(data) * 0.1), 'UTS')
-        params = {}
-        for col in ['speed', 'power']:
-            if col in top_samples.columns:
-                params[col] = {
-                    'min': top_samples[col].min(),
-                    'max': top_samples[col].max(),
-                    'mean': top_samples[col].mean()
-                }
-        return params
+        # Remove rows with NaN values
+        valid_data = data.dropna(subset=['UTS'])
+        if not valid_data.empty:
+            top_samples = valid_data.nlargest(max(1, int(len(valid_data) * 0.1)), 'UTS')
+            params = {}
+            for col in ['speed', 'power']:
+                if col in top_samples.columns:
+                    params[col] = {
+                        'min': top_samples[col].min(),
+                        'max': top_samples[col].max(),
+                        'mean': top_samples[col].mean()
+                    }
+            return params
     return None
 
 def main():
@@ -75,6 +95,9 @@ def main():
             # Load and process data
             data = pd.read_csv(uploaded_file)
             processed_data = process_data(data)
+            
+            # Display available columns
+            st.write("Available columns in your data:", processed_data.columns.tolist())
 
             if processed_data.empty:
                 st.error("No valid data found after processing. Please check your input file.")
@@ -99,35 +122,43 @@ def main():
             with tab2:
                 st.header("Process Parameter Analysis")
                 
+                # Get numeric columns for selection
+                numeric_columns = processed_data.select_dtypes(include=[np.number]).columns.tolist()
+                
                 col1, col2 = st.columns(2)
                 with col1:
                     x_param = st.selectbox(
                         "X-axis parameter:",
-                        ['power', 'speed']
+                        numeric_columns
                     )
                 with col2:
                     y_param = st.selectbox(
                         "Y-axis parameter:",
-                        ['UTS', 'YS', 'Elongation']
+                        numeric_columns
                     )
 
-                if x_param in processed_data.columns and y_param in processed_data.columns:
+                if x_param and y_param:
                     # Create scatter plot
                     fig = create_scatter_plot(processed_data, x_param, y_param)
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Calculate and display statistics
-                    stats_results = calculate_statistics(processed_data, x_param, y_param)
-                    st.write("### Statistical Analysis")
-                    for stat, value in stats_results.items():
-                        st.write(f"**{stat}:** {value:.4f}")
+                    if fig:
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Calculate and display statistics
+                        stats_results = calculate_statistics(processed_data, x_param, y_param)
+                        if stats_results:
+                            st.write("### Statistical Analysis")
+                            for stat, value in stats_results.items():
+                                st.write(f"**{stat}:** {value:.4f}")
 
             with tab3:
                 st.header("Property Analysis")
                 
+                # Get numeric columns for correlation
+                numeric_data = processed_data.select_dtypes(include=[np.number])
+                
                 # Correlation heatmap
                 st.subheader("Correlation Matrix")
-                corr_matrix = processed_data[['speed', 'power', 'UTS', 'YS', 'Elongation']].corr()
+                corr_matrix = numeric_data.corr()
                 fig = px.imshow(
                     corr_matrix,
                     color_continuous_scale='RdBu',
@@ -139,15 +170,16 @@ def main():
                 st.subheader("Property Distributions")
                 property_to_plot = st.selectbox(
                     "Select property:",
-                    ['UTS', 'YS', 'Elongation']
+                    numeric_columns
                 )
                 
-                fig = px.box(
-                    processed_data,
-                    y=property_to_plot,
-                    title=f"{property_to_plot} Distribution"
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                if property_to_plot:
+                    fig = px.box(
+                        processed_data,
+                        y=property_to_plot,
+                        title=f"{property_to_plot} Distribution"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
 
             with tab4:
                 st.header("Process Optimization")
@@ -164,14 +196,15 @@ def main():
                         """)
                     
                     # Create scatter matrix for top performing samples
-                    st.subheader("Parameter Relationships in Top Performing Samples")
-                    top_samples = processed_data.nlargest(int(len(processed_data) * 0.1), 'UTS')
-                    fig = px.scatter_matrix(
-                        top_samples,
-                        dimensions=['power', 'speed', 'UTS', 'YS', 'Elongation'],
-                        title="Parameter Relationships in Top Performing Samples"
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                    if len(numeric_columns) > 1:
+                        st.subheader("Parameter Relationships in Top Performing Samples")
+                        top_samples = processed_data.nlargest(int(len(processed_data) * 0.1), 'UTS')
+                        fig = px.scatter_matrix(
+                            top_samples,
+                            dimensions=numeric_columns[:5],  # Limit to first 5 numeric columns
+                            title="Parameter Relationships in Top Performing Samples"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
 
         except Exception as e:
             st.error(f"Error processing file: {str(e)}")
