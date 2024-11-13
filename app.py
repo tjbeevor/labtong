@@ -1,11 +1,24 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
+from plotly import express as px, graph_objects as go
 from scipy import stats
-import io
 import base64
+
+# Cache the data loading
+@st.cache_data
+def load_data(file):
+    return pd.read_csv(file)
+
+# Cache the data processing
+@st.cache_data
+def process_data(df):
+    # Your data processing code here
+    return processed_df
+
+# Initialize session state at startup
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = False
 
 class LPBFAnalyzer:
     def __init__(self, data: pd.DataFrame):
