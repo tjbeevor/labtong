@@ -7,182 +7,192 @@ from scipy import stats
 
 st.set_page_config(page_title="LPBF AlSi10Mg Analysis", layout="wide")
 
-def calculate_energy_density(power, speed, hatch, thickness):
-    """Calculate volumetric energy density in J/mm³"""
-    return power / (speed * hatch * thickness)
-
-def process_data(df):
-    """Process LPBF data with materials science focus"""
-    processed_df = df.copy()
+def process_lpbf_data(df):
+    """Process LPBF data and calculate key parameters"""
+    df = df.copy()
     
     # Convert numeric columns
-    numeric_cols = processed_df.select_dtypes(include=[np.number]).columns
+    numeric_cols = ['power', 'speed', 'Hatch', 'thickness', 'UTS', 'YS', 'Elongation']
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    # Calculate energy density where possible
-    if all(col in processed_df.columns for col in ['power', 'speed', 'Hatch', 'thickness']):
-        processed_df['Energy_Density'] = calculate_energy_density(
-            processed_df['power'],
-            processed_df['speed'],
-            processed_df['Hatch'],
-            processed_df['thickness']
-        )
+    # Calculate energy density (J/mm³)
+    if all(col in df.columns for col in ['power', 'speed', 'Hatch', 'thickness']):
+        df['Energy_Density'] = df['power'] / (df['speed'] * df['Hatch'] * df['thickness'])
     
-    # Calculate strength to weight ratio if possible
-    if 'UTS' in processed_df.columns:
-        processed_df['Specific_Strength'] = processed_df['UTS'] / 2.7  # AlSi10Mg density ≈ 2.7 g/cm³
-    
-    return processed_df
+    return df
 
 def main():
-    st.title("LPBF AlSi10Mg Process-Property Analyzer")
-    st.write("""
-    Analyze the relationships between processing parameters, heat treatment, and mechanical properties 
-    of LPBF AlSi10Mg. Upload your data to begin analysis.
-    """)
-
+    st.title("LPBF AlSi10Mg Process-Property Explorer")
+    
     uploaded_file = st.file_uploader("Upload LPBF data (CSV)", type="csv")
-
+    
     if uploaded_file:
         data = pd.read_csv(uploaded_file)
-        processed_data = process_data(data)
-
-        # Create main analysis sections
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "Process-Property Relationships",
-            "Heat Treatment Analysis",
-            "Property Optimization",
-            "Quality Assessment"
-        ])
-
-        with tab1:
-            st.header("Process-Property Relationships")
+        df = process_lpbf_data(data)
+        
+        # Sidebar for interactive parameter exploration
+        st.sidebar.header("Process Parameter Exploration")
+        
+        # Power and Speed Ranges
+        power_range = st.sidebar.slider(
+            "Laser Power Range (W)", 
+            min_value=int(df['power'].min()),
+            max_value=int(df['power'].max()),
+            value=(int(df['power'].min()), int(df['power'].max()))
+        )
+        
+        speed_range = st.sidebar.slider(
+            "Scan Speed Range (mm/s)",
+            min_value=int(df['speed'].min()),
+            max_value=int(df['speed'].max()),
+            value=(int(df['speed'].min()), int(df['speed'].max()))
+        )
+        
+        # Filter data based on selections
+        filtered_df = df[
+            (df['power'].between(*power_range)) &
+            (df['speed'].between(*speed_range))
+        ]
+        
+        # Main content area
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.header("Process Window Analysis")
             
-            # Energy Density Analysis
-            st.subheader("Energy Density Impact")
-            col1, col2 = st.columns(2)
+            # Create process window plot
+            fig = go.Figure()
             
-            with col1:
-                if 'Energy_Density' in processed_data.columns:
-                    fig = px.scatter(
-                        processed_data,
-                        x='Energy_Density',
-                        y='UTS',
-                        color='Direction' if 'Direction' in processed_data.columns else None,
-                        title="Energy Density vs Ultimate Tensile Strength",
-                        labels={
-                            'Energy_Density': 'Energy Density (J/mm³)',
-                            'UTS': 'Ultimate Tensile Strength (MPa)'
-                        }
-                    )
-                    st.plotly_chart(fig)
-                    
-                    # Add process window identification
-                    optimal_energy = processed_data.loc[processed_data['UTS'].idxmax(), 'Energy_Density']
-                    st.write(f"Optimal Energy Density: {optimal_energy:.2f} J/mm³")
-
-            with col2:
-                if 'Energy_Density' in processed_data.columns:
-                    fig = px.scatter(
-                        processed_data,
-                        x='Energy_Density',
-                        y='Elongation',
-                        color='Direction' if 'Direction' in processed_data.columns else None,
-                        title="Energy Density vs Elongation",
-                        labels={
-                            'Energy_Density': 'Energy Density (J/mm³)',
-                            'Elongation': 'Elongation (%)'
-                        }
-                    )
-                    st.plotly_chart(fig)
-
-            # Process Parameter Map
-            st.subheader("Process Parameter Map")
-            if all(col in processed_data.columns for col in ['power', 'speed', 'UTS']):
-                fig = px.scatter(
-                    processed_data,
-                    x='speed',
-                    y='power',
-                    color='UTS',
-                    size='UTS',
-                    title="Process Parameter Map",
-                    labels={
-                        'speed': 'Scan Speed (mm/s)',
-                        'power': 'Laser Power (W)',
-                        'UTS': 'Ultimate Tensile Strength (MPa)'
-                    }
-                )
-                st.plotly_chart(fig)
-
-        with tab2:
-            st.header("Heat Treatment Analysis")
+            # Add scatter plot of all data points
+            fig.add_trace(go.Scatter(
+                x=filtered_df['speed'],
+                y=filtered_df['power'],
+                mode='markers',
+                marker=dict(
+                    size=filtered_df['UTS']/10,
+                    color=filtered_df['UTS'],
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title="UTS (MPa)")
+                ),
+                text=filtered_df['UTS'].round(1),
+                name='Process Points'
+            ))
             
-            # Heat Treatment Effect Analysis
-            if 'solution temp' in processed_data.columns:
-                st.subheader("Solution Treatment Effects")
-                
+            # Update layout
+            fig.update_layout(
+                title="Process Window Map (Bubble size and color indicate UTS)",
+                xaxis_title="Scan Speed (mm/s)",
+                yaxis_title="Laser Power (W)",
+                height=600
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.header("Property Analysis")
+            
+            # Display key statistics
+            mean_uts = filtered_df['UTS'].mean()
+            max_uts = filtered_df['UTS'].max()
+            
+            st.metric("Average UTS (MPa)", f"{mean_uts:.1f}")
+            st.metric("Maximum UTS (MPa)", f"{max_uts:.1f}")
+            
+            # Optimal parameter identification
+            optimal_row = filtered_df.loc[filtered_df['UTS'].idxmax()]
+            
+            st.write("### Optimal Parameters")
+            st.write(f"Power: {optimal_row['power']:.0f} W")
+            st.write(f"Speed: {optimal_row['speed']:.0f} mm/s")
+            if 'Energy_Density' in optimal_row:
+                st.write(f"Energy Density: {optimal_row['Energy_Density']:.2f} J/mm³")
+        
+        # Property Relationships Section
+        st.header("Property Relationships")
+        col3, col4 = st.columns(2)
+        
+        with col3:
+            # Strength-Ductility Relationship
+            fig = px.scatter(
+                filtered_df,
+                x='UTS',
+                y='Elongation',
+                color='Energy_Density' if 'Energy_Density' in filtered_df.columns else None,
+                title="Strength-Ductility Trade-off",
+                labels={
+                    'UTS': 'Ultimate Tensile Strength (MPa)',
+                    'Elongation': 'Elongation (%)',
+                    'Energy_Density': 'Energy Density (J/mm³)'
+                }
+            )
+            st.plotly_chart(fig)
+        
+        with col4:
+            # YS/UTS Ratio Analysis
+            filtered_df['YS_UTS_Ratio'] = filtered_df['YS'] / filtered_df['UTS']
+            
+            fig = px.histogram(
+                filtered_df,
+                x='YS_UTS_Ratio',
+                title="YS/UTS Ratio Distribution",
+                labels={'YS_UTS_Ratio': 'Yield Strength / Ultimate Tensile Strength'}
+            )
+            st.plotly_chart(fig)
+        
+        # Heat Treatment Effects
+        st.header("Heat Treatment Effects")
+        if 'solution temp' in filtered_df.columns:
+            col5, col6 = st.columns(2)
+            
+            with col5:
                 fig = px.box(
-                    processed_data,
-                    x=pd.qcut(processed_data['solution temp'], q=4),
+                    filtered_df,
+                    x=pd.qcut(filtered_df['solution temp'], q=4, labels=['Q1', 'Q2', 'Q3', 'Q4']),
                     y='UTS',
                     title="Solution Temperature Effect on Strength",
                     labels={
-                        'solution temp': 'Solution Temperature (°C)',
+                        'x': 'Solution Temperature Quartile',
                         'UTS': 'Ultimate Tensile Strength (MPa)'
                     }
                 )
                 st.plotly_chart(fig)
-
-                # Heat Treatment Optimization Guide
-                st.subheader("Heat Treatment Optimization")
-                optimal_solution_temp = processed_data.loc[processed_data['UTS'].idxmax(), 'solution temp']
-                st.write(f"Optimal Solution Temperature: {optimal_solution_temp:.0f}°C")
-
-        with tab3:
-            st.header("Property Optimization")
             
-            # Property Distribution Analysis
-            st.subheader("Strength-Ductility Balance")
-            if all(col in processed_data.columns for col in ['UTS', 'Elongation']):
-                fig = px.scatter(
-                    processed_data,
-                    x='UTS',
-                    y='Elongation',
-                    color='Energy_Density' if 'Energy_Density' in processed_data.columns else None,
-                    title="Strength-Ductility Relationship",
-                    labels={
-                        'UTS': 'Ultimate Tensile Strength (MPa)',
-                        'Elongation': 'Elongation (%)',
-                        'Energy_Density': 'Energy Density (J/mm³)'
-                    }
-                )
-                st.plotly_chart(fig)
-
-            # Optimization Guidelines
-            st.subheader("Process Optimization Guidelines")
-            if 'UTS' in processed_data.columns:
-                top_performers = processed_data.nlargest(5, 'UTS')
-                st.write("Top 5 Performing Parameters:")
-                st.dataframe(top_performers[['power', 'speed', 'UTS', 'YS', 'Elongation']].style.highlight_max())
-
-        with tab4:
-            st.header("Quality Assessment")
-            
-            # Quality Metrics
-            st.subheader("Quality Metrics")
-            if 'Density' in processed_data.columns:
+            with col6:
+                optimal_temp = filtered_df.loc[filtered_df['UTS'].idxmax(), 'solution temp']
+                st.write(f"### Optimal Heat Treatment")
+                st.write(f"Solution Temperature: {optimal_temp:.0f}°C")
+        
+        # Quality Metrics
+        st.header("Quality Assessment")
+        col7, col8 = st.columns(2)
+        
+        with col7:
+            if 'Density' in filtered_df.columns:
                 fig = px.histogram(
-                    processed_data,
+                    filtered_df,
                     x='Density',
                     title="Part Density Distribution",
                     labels={'Density': 'Relative Density (%)'}
                 )
                 st.plotly_chart(fig)
-
-            # Property Achievement Rate
-            if 'UTS' in processed_data.columns:
-                target_uts = 400  # Target UTS for AlSi10Mg
-                achievement_rate = (processed_data['UTS'] >= target_uts).mean() * 100
-                st.metric("Property Achievement Rate", f"{achievement_rate:.1f}%")
+        
+        with col8:
+            # Process stability assessment
+            energy_density_range = filtered_df['Energy_Density'].describe()
+            st.write("### Process Stability Metrics")
+            st.write(f"Energy Density Range: {energy_density_range['min']:.2f} - {energy_density_range['max']:.2f} J/mm³")
+            st.write(f"Coefficient of Variation: {filtered_df['UTS'].std() / filtered_df['UTS'].mean() * 100:.1f}%")
+        
+        # Export processed data
+        st.download_button(
+            label="Download Processed Data",
+            data=filtered_df.to_csv(index=False),
+            file_name="processed_lpbf_data.csv",
+            mime="text/csv"
+        )
 
 if __name__ == "__main__":
     main()
