@@ -1,0 +1,27 @@
+# Core data processing and analysis
+pandas>=1.5.0
+numpy>=1.21.0
+scipy>=1.7.0
+
+# Visualization
+plotly>=5.13.0
+matplotlib>=3.5.0
+
+# Web application
+streamlit>=1.22.0
+
+# Statistical analysis
+statsmodels>=0.13.0
+scikit-learn>=1.0.0
+
+# Optional but recommended for better performance
+numba>=0.56.0
+pandas-profiling>=3.2.0
+
+# Data validation and handling
+pyarrow>=11.0.0
+openpyxl>=3.0.10  # For Excel file support if needed
+
+# Type checking and development
+typing-extensions>=4.5.0
+python-dateutil>=2.8.2
